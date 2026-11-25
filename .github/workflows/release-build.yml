@@ -26,47 +26,52 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK & Accept Licenses
-        uses: android-actions/setup-android@v3
-
-      - name: Install Required Android SDK Platforms & NDK
+      - name: Configure Preinstalled Android SDK, Licenses & NDK
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platform-tools" || true
-          sdkmanager "build-tools;36.0.0" || true
-          sdkmanager "platforms;android-36" || true
-          sdkmanager "platforms;android-36.1" || true
-          if [ -n "${ANDROID_NDK_LATEST_HOME:-}" ] && [ -d "${ANDROID_NDK_LATEST_HOME:-}" ]; then
-            echo "ANDROID_NDK_HOME=${ANDROID_NDK_LATEST_HOME}" >> "$GITHUB_ENV"
-          else
-            sdkmanager "ndk;27.2.12479018"
-            NDK_DIR="$(ls -d "${ANDROID_HOME}"/ndk/* 2>/dev/null | sort -V | tail -n 1)"
-            echo "ANDROID_NDK_HOME=${NDK_DIR}" >> "$GITHUB_ENV"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
+
+          SDKMANAGER="$(find "${SDK_ROOT}/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort -V | tail -n 1 || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found under ${SDK_ROOT}/cmdline-tools"
+            exit 1
           fi
+          echo "Using sdkmanager: ${SDKMANAGER}"
+
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses
+          set -o pipefail
+
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "build-tools;36.0.0" || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36" || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36.1" || true
+
+          if [ -n "${ANDROID_NDK_LATEST_HOME:-}" ] && [ -d "${ANDROID_NDK_LATEST_HOME}" ]; then
+            NDK_DIR="${ANDROID_NDK_LATEST_HOME}"
+          else
+            NDK_DIR="$(ls -d "${SDK_ROOT}"/ndk/* 2>/dev/null | sort -V | tail -n 1 || true)"
+            if [ -z "$NDK_DIR" ] || [ ! -d "$NDK_DIR" ]; then
+              "$SDKMANAGER" --sdk_root="$SDK_ROOT" "ndk;27.2.12479018"
+              NDK_DIR="$(ls -d "${SDK_ROOT}"/ndk/* 2>/dev/null | sort -V | tail -n 1)"
+            fi
+          fi
+          echo "Using NDK: ${NDK_DIR}"
+          echo "ANDROID_NDK_HOME=${NDK_DIR}" >> "$GITHUB_ENV"
 
       - name: Set up Rust toolchain with Android targets
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
-      - name: Cache Rust cargo registry & build artifacts
-        uses: actions/cache@v4
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            rust/fluxpdf-engine/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/fluxpdf-engine/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          workspaces: "rust/fluxpdf-engine -> target"
 
       - name: Install cargo-ndk
-        run: |
-          if ! command -v cargo-ndk >/dev/null 2>&1; then
-            cargo install cargo-ndk --locked
-          fi
+        uses: taiki-e/install-action@cargo-ndk
 
       - name: Run Rust Engine Unit Tests
         working-directory: rust/fluxpdf-engine
@@ -90,12 +95,16 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
-      - name: Configure Release Signing Keystore
+      - name: Configure Signing Keystores
         env:
           SECRET_KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
           SECRET_STORE_PASS: ${{ secrets.STORE_PASSWORD }}
           SECRET_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
         run: |
+          if [ -f "${GITHUB_WORKSPACE}/debug.keystore.base64" ] && [ ! -f "${GITHUB_WORKSPACE}/debug.keystore" ]; then
+            base64 --decode "${GITHUB_WORKSPACE}/debug.keystore.base64" > "${GITHUB_WORKSPACE}/debug.keystore"
+          fi
+
           KEYSTORE_FILE="${GITHUB_WORKSPACE}/my-upload-key.jks"
           if [ -n "$SECRET_KEYSTORE_B64" ] && [ -n "$SECRET_STORE_PASS" ] && [ -n "$SECRET_KEY_PASS" ]; then
             echo "Using repository release signing secrets."

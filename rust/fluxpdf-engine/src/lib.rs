@@ -8,7 +8,7 @@ pub mod parser;
 pub mod search;
 
 use jni::objects::{JClass, JString};
-use jni::sys::{jint, jlong};
+use jni::sys::{jint, jlong, jstring};
 use jni::JNIEnv;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
@@ -25,12 +25,14 @@ static DOCUMENTS: Lazy<RwLock<HashMap<i64, Arc<MappedPdfDocument>>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[no_mangle]
+#[allow(unused_mut)]
 pub extern "system" fn Java_com_example_engine_FluxNativeBridge_nativeEngineVersion<'local>(
-    env: JNIEnv<'local>,
+    mut env: JNIEnv<'local>,
     _class: JClass<'local>,
-) -> JString<'local> {
+) -> jstring {
     env.new_string("fluxpdf-rust-0.1.0 (mmap + flate2)")
         .expect("Failed to allocate version string")
+        .into_raw()
 }
 
 #[no_mangle]
@@ -69,32 +71,38 @@ pub extern "system" fn Java_com_example_engine_FluxNativeBridge_nativeCloseDocum
 }
 
 #[no_mangle]
+#[allow(unused_mut)]
 pub extern "system" fn Java_com_example_engine_FluxNativeBridge_nativeGetMetadataJson<'local>(
-    env: JNIEnv<'local>,
+    mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
-) -> JString<'local> {
+) -> jstring {
     let doc = DOCUMENTS.read().get(&handle).cloned();
     let json = match doc {
         Some(d) => d.metadata_json(),
         None => "{}".to_string(),
     };
-    env.new_string(json).expect("Failed to allocate metadata JSON")
+    env.new_string(json)
+        .expect("Failed to allocate metadata JSON")
+        .into_raw()
 }
 
 #[no_mangle]
+#[allow(unused_mut)]
 pub extern "system" fn Java_com_example_engine_FluxNativeBridge_nativeExtractPageText<'local>(
-    env: JNIEnv<'local>,
+    mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
     page_index: jint,
-) -> JString<'local> {
+) -> jstring {
     let doc = DOCUMENTS.read().get(&handle).cloned();
     let text = match doc {
         Some(d) => d.extract_page_text(page_index.max(0) as usize),
         None => String::new(),
     };
-    env.new_string(text).expect("Failed to allocate extracted text")
+    env.new_string(text)
+        .expect("Failed to allocate extracted text")
+        .into_raw()
 }
 
 #[no_mangle]
@@ -105,10 +113,15 @@ pub extern "system" fn Java_com_example_engine_FluxNativeBridge_nativeSearchJson
     query: JString<'local>,
     case_sensitive: jint,
     whole_word: jint,
-) -> JString<'local> {
+) -> jstring {
     let query_str: String = match env.get_string(&query) {
         Ok(s) => s.into(),
-        Err(_) => return env.new_string("[]").expect("Failed to allocate empty JSON"),
+        Err(_) => {
+            return env
+                .new_string("[]")
+                .expect("Failed to allocate empty JSON")
+                .into_raw()
+        }
     };
     let doc = DOCUMENTS.read().get(&handle).cloned();
     let results = match doc {
@@ -122,7 +135,9 @@ pub extern "system" fn Java_com_example_engine_FluxNativeBridge_nativeSearchJson
         }
         None => "[]".to_string(),
     };
-    env.new_string(results).expect("Failed to allocate search JSON")
+    env.new_string(results)
+        .expect("Failed to allocate search JSON")
+        .into_raw()
 }
 
 #[cfg(test)]
