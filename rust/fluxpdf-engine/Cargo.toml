@@ -1,0 +1,24 @@
+[package]
+name = "fluxpdf-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Zero-copy Rust PDF parsing, text extraction, and trigram full-text search engine for FluxPDF Android"
+
+[lib]
+name = "fluxpdf_engine"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+flate2 = "1.0"
+jni = "0.21"
+memmap2 = "0.9"
+once_cell = "1.19"
+parking_lot = "0.12"
+thiserror = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
